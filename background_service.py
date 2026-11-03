@@ -16,11 +16,13 @@ except Exception:
 import io
 import json
 import time
+import math
 import asyncio
 import winsound
 import webbrowser
 import subprocess
 import threading
+import tkinter as tk
 
 import sounddevice as sd
 import soundfile as sf
@@ -53,6 +55,7 @@ APP_PATHS = {
     "calculator": "calc.exe",
     "calc": "calc.exe",
     "task_manager": "taskmgr.exe",
+    "task manager": "taskmgr.exe",
     "explorer": "explorer.exe",
     "cmd": "cmd.exe",
     "powershell": "powershell.exe",
@@ -132,6 +135,120 @@ async def text_to_speech(text: str):
 def speak(text: str):
     asyncio.run(text_to_speech(text))
 
+# --- FLOATING VISUAL OVERLAY (VÒNG TRÒN / BANNER THÔNG BÁO) ---
+class VoiceOverlay:
+    def __init__(self, root):
+        self.root = root
+        self.root.overrideredirect(True)
+        self.root.wm_attributes("-topmost", True)
+        self.root.wm_attributes("-alpha", 0.96)
+
+        self.width = 380
+        self.height = 76
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        x = (screen_w - self.width) // 2
+        y = screen_h - self.height - 90  # 90px above taskbar
+        self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+        self.canvas = tk.Canvas(
+            self.root,
+            width=self.width,
+            height=self.height,
+            bg="#0f172a",
+            highlightthickness=2,
+            highlightbackground="#0ea5e9"
+        )
+        self.canvas.pack(fill="both", expand=True)
+
+        self.anim_step = 0
+        self.animating = False
+        self.state = "hidden"
+        self.root.withdraw()
+
+    def show_listening(self):
+        self.state = "listening"
+        self.root.deiconify()
+        self.canvas.config(highlightbackground="#06b6d4")  # Cyan neon
+        self.animating = True
+        self._animate_listening()
+
+    def show_processing(self):
+        self.state = "processing"
+        self.animating = True
+        self.canvas.config(highlightbackground="#a855f7")  # Purple neon
+        self._animate_processing()
+
+    def show_done(self, text, speech):
+        self.state = "done"
+        self.animating = False
+        self.canvas.config(highlightbackground="#22c55e")  # Green
+        self.canvas.delete("all")
+        # Success icon
+        self.canvas.create_oval(18, 18, 54, 54, fill="#22c55e", outline="")
+        self.canvas.create_text(36, 36, text="✓", fill="#ffffff", font=("Segoe UI", 16, "bold"))
+        # Text
+        short_text = text if len(text) < 32 else text[:29] + "..."
+        self.canvas.create_text(68, 26, anchor="w", text=f"\"{short_text}\"", fill="#f8fafc", font=("Segoe UI", 11, "bold"))
+        short_speech = speech if len(speech) < 42 else speech[:39] + "..."
+        self.canvas.create_text(68, 48, anchor="w", text=short_speech or "Đã thực thi thành công", fill="#86efac", font=("Segoe UI", 9))
+        self.root.after(1800, self.hide)
+
+    def show_error(self, message):
+        self.state = "error"
+        self.animating = False
+        self.canvas.config(highlightbackground="#ef4444")  # Red
+        self.canvas.delete("all")
+        self.canvas.create_oval(18, 18, 54, 54, fill="#ef4444", outline="")
+        self.canvas.create_text(36, 36, text="!", fill="#ffffff", font=("Segoe UI", 16, "bold"))
+        self.canvas.create_text(68, 26, anchor="w", text="Chưa nghe rõ", fill="#f8fafc", font=("Segoe UI", 11, "bold"))
+        self.canvas.create_text(68, 48, anchor="w", text=message, fill="#fca5a5", font=("Segoe UI", 9))
+        self.root.after(1600, self.hide)
+
+    def hide(self):
+        self.state = "hidden"
+        self.animating = False
+        self.root.withdraw()
+
+    def _animate_listening(self):
+        if not self.animating or self.state != "listening":
+            return
+        self.canvas.delete("all")
+        self.anim_step += 0.25
+
+        # Pulsing circle effect
+        r = 16 + 6 * math.sin(self.anim_step)
+        # Outer ring
+        self.canvas.create_oval(36 - r, 36 - r, 36 + r, 36 + r, outline="#06b6d4", width=2)
+        # Center glow circle
+        self.canvas.create_oval(23, 23, 49, 49, fill="#0284c7", outline="")
+        self.canvas.create_text(36, 36, text="🎙️", font=("Segoe UI", 11))
+
+        # Text labels
+        self.canvas.create_text(68, 26, anchor="w", text="Đang lắng nghe...", fill="#f8fafc", font=("Segoe UI", 11, "bold"))
+        self.canvas.create_text(68, 48, anchor="w", text="Hãy nói câu lệnh (hoặc dừng để AI chạy)", fill="#94a3b8", font=("Segoe UI", 9))
+        self.root.after(45, self._animate_listening)
+
+    def _animate_processing(self):
+        if not self.animating or self.state != "processing":
+            return
+        self.canvas.delete("all")
+        self.anim_step += 0.3
+
+        # Spinning / Pulsing purple ring
+        r = 15 + 4 * math.cos(self.anim_step)
+        self.canvas.create_oval(36 - r, 36 - r, 36 + r, 36 + r, outline="#a855f7", width=2)
+        self.canvas.create_oval(24, 24, 48, 48, fill="#7e22ce", outline="")
+        self.canvas.create_text(36, 36, text="🧠", font=("Segoe UI", 10))
+
+        # Text labels
+        dots = "." * (int(self.anim_step * 2) % 4 + 1)
+        self.canvas.create_text(68, 26, anchor="w", text=f"AI đang suy nghĩ{dots}", fill="#f8fafc", font=("Segoe UI", 11, "bold"))
+        self.canvas.create_text(68, 48, anchor="w", text="Đang nhận diện giọng nói & phân tích", fill="#c084fc", font=("Segoe UI", 9))
+        self.root.after(100, self._animate_processing)
+
+overlay_app = None
+
 def execute_action(action_data: dict):
     action = action_data.get("action", "chat")
     target = action_data.get("target", "").lower().strip()
@@ -188,12 +305,15 @@ def record_and_process():
     is_recording = True
     stop_recording_event.clear()
 
+    # Show overlay and play start sound
+    if overlay_app:
+        overlay_app.root.after(0, overlay_app.show_listening)
     sound_start()
     print(f"\n[{time.strftime('%H:%M:%S')}] Đang ghi âm giọng nói...")
 
     audio_frames = []
     chunk_size = 1024
-    silence_threshold = 0.015
+    silence_threshold = 0.014
     silence_duration_needed = 1.3
     consecutive_silent_chunks = 0
     chunks_per_second = SAMPLE_RATE / chunk_size
@@ -207,7 +327,7 @@ def record_and_process():
 
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32", blocksize=chunk_size, callback=callback):
         while not stop_recording_event.is_set():
-            time.sleep(0.05)
+            time.sleep(0.04)
             if audio_frames:
                 latest_chunk = audio_frames[-1]
                 rms = np.sqrt(np.mean(latest_chunk**2))
@@ -229,7 +349,13 @@ def record_and_process():
 
     if not audio_frames or not has_spoken:
         print(" [!] Không nhận thấy giọng nói.")
+        if overlay_app:
+            overlay_app.root.after(0, lambda: overlay_app.show_error("Vui lòng thử nói lại gần mic hơn"))
         return
+
+    # Switch overlay to processing state
+    if overlay_app:
+        overlay_app.root.after(0, overlay_app.show_processing)
 
     audio_data = np.concatenate(audio_frames, axis=0)
     wav_io = io.BytesIO()
@@ -252,11 +378,21 @@ def record_and_process():
         )
         res_text = response.text.strip()
         data = json.loads(res_text)
-        print(f"[{time.strftime('%H:%M:%S')}] Bạn nói: \"{data.get('transcription', '')}\"")
+        transcription = data.get("transcription", "")
+        speech = data.get("speech_response", "")
+
+        print(f"[{time.strftime('%H:%M:%S')}] Bạn nói: \"{transcription}\"")
+
+        # Show success on overlay
+        if overlay_app:
+            overlay_app.root.after(0, lambda: overlay_app.show_done(transcription, speech))
+
         execute_action(data)
     except Exception as e:
         print(f" [!] Lỗi AI: {e}")
         sound_error()
+        if overlay_app:
+            overlay_app.root.after(0, lambda: overlay_app.show_error(f"Lỗi: {e}"))
 
 def on_hotkey_trigger():
     if not is_recording:
@@ -264,15 +400,26 @@ def on_hotkey_trigger():
     else:
         stop_recording_event.set()
 
-def main():
-    print(f"[{time.strftime('%H:%M:%S')}] AI Voice Assistant (Background Service) đã khởi động thành công!")
-    print(f"[{time.strftime('%H:%M:%S')}] Phím nóng: [Ctrl + Shift + Space] hoặc [F8]")
-
+def start_keyboard_listener():
     with keyboard.GlobalHotKeys({
         '<ctrl>+<shift>+<space>': on_hotkey_trigger,
         '<f8>': on_hotkey_trigger
     }) as h:
         h.join()
+
+def main():
+    global overlay_app
+    print(f"[{time.strftime('%H:%M:%S')}] AI Voice Assistant with Visual Overlay đã khởi động thành công!")
+    print(f"[{time.strftime('%H:%M:%S')}] Phím nóng: [Ctrl + Shift + Space] hoặc [F8]")
+
+    # Start keyboard listener in daemon thread
+    listener_thread = threading.Thread(target=start_keyboard_listener, daemon=True)
+    listener_thread.start()
+
+    # Main thread runs Tkinter event loop for the overlay widget
+    root = tk.Tk()
+    overlay_app = VoiceOverlay(root)
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
