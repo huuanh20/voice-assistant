@@ -1,5 +1,13 @@
 import os
 import sys
+
+# Ensure UTF-8 output in Windows Console
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import io
 import json
 import time
@@ -17,13 +25,11 @@ from dotenv import load_dotenv
 ENV_FILE = Path(__file__).parent / ".env"
 load_dotenv(ENV_FILE)
 
-# Check API Key
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     print("=" * 60)
     print(" [!] CHƯA CÓ GEMINI_API_KEY TRONG FILE .env")
     print("=" * 60)
-    print("Bạn có thể lấy key miễn phí trong 10 giây tại: https://aistudio.google.com/apikey")
     key_input = input("👉 Nhập hoặc dán GEMINI_API_KEY vào đây (Enter để tiếp tục): ").strip()
     if key_input:
         API_KEY = key_input
@@ -126,7 +132,6 @@ def execute_action(action_data: dict):
 
     try:
         if action == "open_app":
-            # Match known apps
             matched = False
             for app_key, app_val in APP_PATHS.items():
                 if app_key in target or target in app_key:
@@ -140,7 +145,6 @@ def execute_action(action_data: dict):
                     break
             
             if not matched:
-                # Try opening via Windows Start
                 subprocess.Popen(f"start {target}", shell=True)
                 print(f" [✓] Đã gửi lệnh mở: {target}")
 
@@ -160,7 +164,6 @@ def execute_action(action_data: dict):
                 subprocess.run("rundll32.exe user32.dll,LockWorkStation", shell=True)
                 print(" [✓] Đã khóa màn hình máy tính.")
             elif "volume_up" in target:
-                # Volume up via PowerShell virtual key
                 subprocess.run('powershell -c "(New-Object -ComObject Wscript.Shell).SendKeys([char]175 * 5)"', shell=True)
                 print(" [✓] Đã tăng âm lượng.")
             elif "volume_down" in target:
@@ -185,43 +188,55 @@ def record_audio_until_keypress():
 
     stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32", callback=callback)
     with stream:
-        input()  # Wait for user to press Enter
+        input()
         recording = False
 
     if not audio_frames:
         return None
 
     audio_data = np.concatenate(audio_frames, axis=0)
-    # Convert to WAV bytes in memory
     wav_io = io.BytesIO()
     sf.write(wav_io, audio_data, SAMPLE_RATE, format="WAV")
-    wav_bytes = wav_io.getvalue()
-    return wav_bytes
+    return wav_io.getvalue()
 
 def process_voice_command(wav_bytes: bytes):
-    """Sends audio to Gemini 2.0 Flash for instant transcription and intent reasoning"""
+    """Sends audio to Gemini 3.5 Flash for instant transcription and intent reasoning"""
     print(" [🧠 AI đang xử lý giọng nói...]")
     start_time = time.time()
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[
-                types.Part.from_bytes(
-                    data=wav_bytes,
-                    mime_type="audio/wav"
-                ),
-                types.Part.from_text(
-                    text="Hãy nghe đoạn ghi âm và phân tích ý định theo định dạng JSON đã chỉ dẫn."
-                )
-            ],
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                temperature=0.1
-            )
-        )
+    # Try models in order of speed
+    models_to_try = ["gemini-3.5-flash", "gemini-3.8-flash"]
+    response = None
 
+    for m in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=m,
+                contents=[
+                    types.Part.from_bytes(
+                        data=wav_bytes,
+                        mime_type="audio/wav"
+                    ),
+                    types.Part.from_text(
+                        text="Hãy nghe đoạn ghi âm và phân tích ý định theo định dạng JSON đã chỉ dẫn."
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
+            )
+            if response:
+                break
+        except Exception:
+            continue
+
+    if not response:
+        print(" [!] Không nhận được phản hồi từ AI. Hãy thử lại.")
+        return
+
+    try:
         elapsed = time.time() - start_time
         res_text = response.text.strip()
         data = json.loads(res_text)
@@ -231,7 +246,7 @@ def process_voice_command(wav_bytes: bytes):
         execute_action(data)
 
     except Exception as e:
-        print(f" [!] Lỗi khi kết nối Gemini: {e}")
+        print(f" [!] Lỗi khi đọc kết quả AI: {e}")
 
 def main():
     print("""
@@ -240,7 +255,7 @@ def main():
 ║      Điều khiển máy tính Windows bằng giọng nói tiếng Việt ║
 ╚════════════════════════════════════════════════════════════╝
 * Micro đang dùng: Microphone (Realtek(R) Audio) tích hợp
-* Model AI: Google Gemini 2.0 Flash (Siêu tốc)
+* Model AI: Google Gemini 3.5 Flash (Siêu tốc)
 * Giọng đọc phản hồi: Microsoft Hoài My (Neural)
 
 👉 HƯỚNG DẪN DÙNG:
