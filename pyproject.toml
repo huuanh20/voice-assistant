@@ -1,0 +1,15 @@
+[project]
+name = "voice-assistant"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "edge-tts>=7.3.1",
+    "google-genai>=2.34.0",
+    "pygame>=2.6.1",
+    "pynput>=1.8.2",
+    "python-dotenv>=1.2.4",
+    "sounddevice>=0.5.6",
+    "soundfile>=0.14.0",
+]
